@@ -26,6 +26,8 @@ class SimulatorWrapper : public BaseWrapper {
     static std::size_t GetDeviceCount();
     static std::string GetDeviceName(std::size_t DeviceIndex);
     std::string GetStatus();
+    float GetSpeed();
+    playback_mode GetMode();
     void CreateCaptureSession(FileWrapper* Wrapper);
     void StartCaptureSession();
     void StopCaptureSession();

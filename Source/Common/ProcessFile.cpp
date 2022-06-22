@@ -5,6 +5,9 @@
  */
 
 //---------------------------------------------------------------------------
+#include <cfloat>
+#include <chrono>
+#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <thread>
@@ -21,10 +24,15 @@ FileWrapper* Wrapper = nullptr;
 bool InControl = false;
 uint64_t Device_Pos = (uint64_t)-1;
 char Device_Command = 0;
+unsigned int Device_Mode = (unsigned int)-1;
+float Device_Speed = FLT_MIN;
+auto Device_LastPacketTime = chrono::steady_clock::now();
 #include "ZenLib/Ztring.h"
 #include "Output.h"
 using namespace ZenLib;
 using namespace std;
+using namespace std::chrono;
+uint64_t VariableSize(const uint8_t* Buffer, size_t& Buffer_Offset, size_t Buffer_Size);
 //---------------------------------------------------------------------------
 
 //***************************************************************************
@@ -67,7 +75,6 @@ void __stdcall Event_CallBackFunction(unsigned char* Data_Content, size_t Data_S
     }
 }
 
-
 //***************************************************************************
 // Control
 //***************************************************************************
@@ -78,12 +85,12 @@ void InputControl_Char(BaseWrapper* Controller, char C)
 {
     switch (C)
     {
-    case 'R': StopRequested = false; Controller->SetPlaybackMode(Playback_Mode_NotPlaying, -2.0); break;
+    case 'R': StopRequested = false; Controller->SetPlaybackMode(Playback_Mode_Playing   , -2.0); break;
     case 'r': StopRequested = false; Controller->SetPlaybackMode(Playback_Mode_Playing   , -1.0); break;
     case 'q': StopRequested = false; Controller->SetPlaybackMode(Playback_Mode_NotPlaying,  0.0); break;
     case 's': StopRequested = true ; Controller->SetPlaybackMode(Playback_Mode_NotPlaying,  0.0); break;
     case 'f': StopRequested = false; Controller->SetPlaybackMode(Playback_Mode_Playing   ,  1.0); break;
-    case 'F': StopRequested = false; Controller->SetPlaybackMode(Playback_Mode_NotPlaying,  2.0); break;
+    case 'F': StopRequested = false; Controller->SetPlaybackMode(Playback_Mode_Playing   ,  2.0); break;
     default: return;
     }
 }
@@ -150,7 +157,7 @@ void file::Parse(const String& FileName)
         #endif
         return;
     }
-    BaseWrapper* Controller = nullptr;
+    Controller = nullptr;
     if (Device_Pos == (size_t)-1 && FileName.rfind(__T("device://"), 0) == 0)
         Device_Pos = (size_t)Ztring(FileName.substr(9)).To_int64u();
     if (Device_Pos == (size_t)-1 && Device_Command)
@@ -170,30 +177,24 @@ void file::Parse(const String& FileName)
     }
     if (Controller)
     {
+        Speed_Before = Controller->GetSpeed();
         auto InputHelper = (InControl && !Device_Command) ? new thread(InputControl, Controller) : nullptr;
         if (!Device_Command)
         {
-            cerr << "FileWrapper constructor" << endl;
             FileWrapper Wrapper(this);
             MI.Open_Buffer_Init();
-            cerr << "CreateCaptureSession" << endl;
             Controller->CreateCaptureSession(&Wrapper);
             for (;;)
             {
-                cerr << "StartCaptureSession" << endl;
                 Controller->StartCaptureSession();
-                cerr << "SetPlaybackMode" << endl;
                 Controller->SetPlaybackMode(Playback_Mode_Playing, 1.0);
-                cerr << "WaitForSessionEnd" << endl;
                 Controller->WaitForSessionEnd();
-                cerr << "StopCaptureSession" << endl;
                 Controller->StopCaptureSession();
                 if (!StopRequested)
                     break;
                 while (StopRequested)
                     this_thread::yield();
             }
-            cerr << "Open_Buffer_Finalize" << endl;
             MI.Open_Buffer_Finalize();
         }
         else if (Device_Command >= 0x20)
@@ -203,12 +204,28 @@ void file::Parse(const String& FileName)
         else if (Device_Command == 2)
         {
             FileWrapper Wrapper(this);
-            cerr << "CreateCaptureSession" << endl;
-            this_thread::sleep_for(chrono::milliseconds(500)); // give time for the driver to retrieves status from the device
             Controller->CreateCaptureSession(&Wrapper);
-            cerr << "GetStatus" << endl;
+            this_thread::sleep_for(chrono::milliseconds(500)); // give time for the driver to retrieves status from the device
             cout << Controller->GetStatus() << '\n';
             return;
+        }
+        else if (Device_Command == 3)
+        {
+            if (Device_Mode == -1)
+            {
+                if (Device_Speed == 1)
+                    Device_Mode = Playback_Mode_Playing;
+                else
+                    Device_Mode = Playback_Mode_Playing; // Playback_Mode_NotPlaying;
+            }
+            if (Device_Speed == FLT_MIN)
+            {
+                if (Device_Mode == Playback_Mode_Playing)
+                    Device_Speed = 1.0;
+                else
+                    Device_Speed = 0.0;
+            }
+            Controller->SetPlaybackMode((playback_mode)Device_Mode, Device_Speed);
         }
         if (InputHelper)
         {
@@ -448,7 +465,11 @@ void file::AddFrameAnalysis(const MediaInfo_Event_DvDif_Analysis_Frame_1* FrameD
     }
 
     if (!Merge_OutputFileName.empty())
-        Merge.AddFrameAnalysis(Merge_FilePos, FrameData);
+    {
+        auto Speed = abs(Speed_Before) > abs(Speed_After) ? Speed_Before : Speed_After;
+        Speed_Before = Speed_After;
+        Merge.AddFrameAnalysis(Merge_FilePos, FrameData, Speed);
+    }
 
     // Information
     if (!Merge_FilePos && Verbosity > 0 && Verbosity <= 7)
@@ -477,6 +498,43 @@ void file::AddFrameAnalysis(const MediaInfo_Event_DvDif_Analysis_Frame_1* FrameD
             Text += ' ';
             timecode_to_string(Text, RecDateTime.TimeInSeconds(), TC_Temp.DropFrame(), RecDateTime.Frames());
         }
+        if (Controller)
+        {
+            Text += ' ';
+            Text += '(';
+            Text += ::to_string(Speed_After);
+            Text += 'x';
+            if (FrameData->MoreData)
+            {
+                size_t MoreData_Size = *((size_t*)FrameData->MoreData) + sizeof(size_t);
+                size_t MoreData_Offset = sizeof(size_t);
+                while (MoreData_Offset < MoreData_Size)
+                {
+                    size_t BlockSize = VariableSize(FrameData->MoreData, MoreData_Offset, MoreData_Size);
+                    if (BlockSize == -1)
+                        break;
+                    size_t BlockName = VariableSize(FrameData->MoreData, MoreData_Offset, MoreData_Size);
+                    if (BlockName == -1)
+                        break;
+                    if (BlockName == 2 && BlockSize >= 1)
+                    {
+                        auto RawSpeed = FrameData->MoreData[MoreData_Offset++];
+                        int Speed = RawSpeed & 0x7F;
+                        if (!(RawSpeed & 0x80))
+                            Speed = -Speed;
+                        Text += ',';
+                        Text += ' ';
+                        Text += 'D';
+                        Text += 'V';
+                        Text += ' ';
+                        Text += std::to_string(Speed);
+                    }
+                    else
+                        MoreData_Offset += BlockSize;
+                }
+            }
+            Text += ')';
+        }
         UpdateDynamicDisplay(Text);
     }
 }
@@ -494,6 +552,9 @@ void file::AddFrameData(const MediaInfo_Event_Global_Demux_4* FrameData)
     {
         if (!Merge_OutputFileName.empty() && (Merge_InputFileNames.empty() || Merge_InputFileNames[0] == "-" || Merge_InputFileNames[0].find("device://") == 0)) // Only for stdin
             Merge.AddFrameData(Merge_FilePos, FrameData->Content, FrameData->Content_Size);
+
+        Device_LastPacketTime = chrono::steady_clock::now();
+
         return;
     }
 
@@ -537,11 +598,12 @@ void file::AddFrameData(const MediaInfo_Event_Global_Demux_4* FrameData)
 void UpdateDynamicDisplay(const string& Content)
 {
     static size_t Content_Previous_Size = 0;
-    cerr << Content;
+    string Temp(Content);
     if (Content_Previous_Size > Content.size())
-        cerr << setw(Content_Previous_Size - Content.size()) << ' ';
+        Temp.resize(Content_Previous_Size, ' ');
+    Temp += '\r';
+    cerr << Temp;
     Content_Previous_Size = Content.size();
-    cerr << '\r';
 }
 
 string MediaInfo_Version()

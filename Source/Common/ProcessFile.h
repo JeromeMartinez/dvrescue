@@ -23,6 +23,7 @@
 #include "Common/Merge.h"
 #include "TimeCode.h"
 #include "MediaInfo/MediaInfo_Events.h"
+#include <chrono>
 #include <vector>
 using namespace MediaInfoNameSpace;
 using namespace std;
@@ -124,7 +125,10 @@ private:
     bool no_sourceorcontrol_aud_set_in_first_frame = false;
 
     #if defined(ENABLE_AVFCTL) || defined(ENABLE_SIMULATOR)
+public:
     BaseWrapper* Controller = nullptr;
+    float Speed_Before = 0;
+    float Speed_After = 0;
     rewind_mode RewindMode = Rewind_Mode_None;
     TimeCode RewindTo_TC;
     int RewindTo_Abst = 0;

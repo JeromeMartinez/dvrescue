@@ -282,6 +282,40 @@ return_value Parse(Core &C, int argc, const char* argv_ansi[], const MediaInfoNa
                 continue;
             }
         }
+        else if (!strcmp(argv_ansi[i], "--mode") || !strcmp(argv_ansi[i], "-mode"))
+        {
+            if (++i >= argc)
+            {
+                if (C.Err)
+                    *C.Err << "Error: missing value after " << argv_ansi[i-1] << ".\n";
+                ReturnValue = ReturnValue_ERROR;
+                continue;
+            }
+            if (!strcmp(argv_ansi[i], "p"))
+                Device_Mode = Playback_Mode_Playing;
+            else if (!strcmp(argv_ansi[i], "n"))
+                Device_Mode = Playback_Mode_Playing;
+            else
+            {
+                if (C.Err)
+                    *C.Err << "Error: wrong command after " << argv_ansi[i - 1] << ".\n";
+                ReturnValue = ReturnValue_ERROR;
+                continue;
+            }
+            Device_Command = 3;
+        }
+        else if (!strcmp(argv_ansi[i], "--speed") || !strcmp(argv_ansi[i], "-speed"))
+        {
+            if (++i >= argc)
+            {
+                if (C.Err)
+                    *C.Err << "Error: missing value after " << argv_ansi[i-1] << ".\n";
+                ReturnValue = ReturnValue_ERROR;
+                continue;
+            }
+            Device_Speed = (float)atof(argv_ansi[i]);
+            Device_Command = 3;
+        }
         else if (!strcmp(argv_ansi[i], "--use-abst"))
         {
             if (++i >= argc)

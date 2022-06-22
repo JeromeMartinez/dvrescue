@@ -25,6 +25,8 @@ extern uint8_t UseAbst;
 extern bool InControl;
 extern uint64_t Device_Pos;
 extern char Device_Command;
+extern unsigned int Device_Mode;
+extern float Device_Speed;
 struct MediaInfo_Event_DvDif_Analysis_Frame_1;
 struct MediaInfo_Event_Global_Demux_4;
 
@@ -32,7 +34,7 @@ struct MediaInfo_Event_Global_Demux_4;
 class dv_merge
 {
 public:
-    void AddFrameAnalysis(size_t Merge_FilePos, const MediaInfo_Event_DvDif_Analysis_Frame_1* FrameData);
+    void AddFrameAnalysis(size_t Merge_FilePos, const MediaInfo_Event_DvDif_Analysis_Frame_1* FrameData, float Speed);
     void AddFrameData(size_t Merge_FilePos, const uint8_t* Buffer, size_t Buffer_Size);
     void Finish();
 

@@ -34,7 +34,7 @@ struct ctl
     size_t                      F_Pos = 0;
     vector<File*>               F;
     mutex                       Mutex;
-    system_clock::time_point    Time_Previous_Frame;
+    steady_clock::time_point    Time_Previous_Frame;
 
     // I/O
     size_t                      Io_Pos = (size_t)-1;
@@ -61,39 +61,6 @@ static std::string GetStatus(float Speed)
     }
 
     return status;
-}
-
-//---------------------------------------------------------------------------
-static string to_string(float x)
-{
-    int64u p=0;
-    char* s = (char*)&p + 6; 
-    uint16_t decimals;
-    int units;
-    static int Divisor = 10; // 1 decimal
-    if (x < 0)
-    {
-        decimals = (int)(x * -Divisor + 0.5) % Divisor;
-        units = (int)(-1 * x);
-    }
-    else {
-        decimals = (int)(x * Divisor + 0.5) % Divisor;
-        units = (int)x;
-    }
-
-    *--s = (decimals % 10) + '0'; // 1 decimal
-    *--s = '.';
-
-    do
-    {
-        *--s = (units % 10) + '0';
-        units /= 10;
-    }
-    while (units > 0);
-
-    if (x < 0)
-        *--s = '-';
-    return string(s);
 }
 
 //---------------------------------------------------------------------------
@@ -203,6 +170,26 @@ std::string SimulatorWrapper::GetStatus()
 }
 
 //---------------------------------------------------------------------------
+playback_mode SimulatorWrapper::GetMode()
+{
+    if (!Ctl)
+        return {};
+    auto P = (ctl*)Ctl;
+
+    return P->Mode;
+}
+
+//---------------------------------------------------------------------------
+float SimulatorWrapper::GetSpeed()
+{
+    if (!Ctl)
+        return {};
+    auto P = (ctl*)Ctl;
+
+    return P->Speed;
+}
+
+//---------------------------------------------------------------------------
 void SimulatorWrapper::CreateCaptureSession(FileWrapper* Wrapper)
 {
     auto P = (ctl*)Ctl;
@@ -266,13 +253,13 @@ void SimulatorWrapper::WaitForSessionEnd()
             break;
         }
         auto LastFrameTheoriticalDuration = std::chrono::microseconds((int)(1000000.0 / (30.0 / 1.001) / abs(Speed)));
-        auto Now = system_clock::now();
+        auto Now = steady_clock::now();
         auto LastFrameDuration = duration_cast<std::chrono::microseconds>(Now - P->Time_Previous_Frame);
         if (LastFrameTheoriticalDuration > LastFrameDuration)
         {
             auto Duration = LastFrameTheoriticalDuration - LastFrameDuration;
             this_thread::sleep_for(Duration);
-            P->Time_Previous_Frame = system_clock::now();
+            P->Time_Previous_Frame = steady_clock::now();
         }
         else
             P->Time_Previous_Frame = Now;
@@ -290,7 +277,8 @@ void SimulatorWrapper::WaitForSessionEnd()
                 P->Mode = Playback_Mode_NotPlaying;
                 P->Speed = 0;
                 P->Mutex.unlock();
-                continue;
+                break;
+                //continue;
             }
             F->GoTo(-120000 * 2, File::FromCurrent);
         }
@@ -323,7 +311,7 @@ void SimulatorWrapper::SetPlaybackMode(playback_mode Mode, float Speed)
     // Update
     P->Mode = Mode;
     P->Speed = Speed;
-    P->Time_Previous_Frame = system_clock::now();
+    P->Time_Previous_Frame = steady_clock::now();
 
     // Switch to next file
     if (P->IsCapturing)
