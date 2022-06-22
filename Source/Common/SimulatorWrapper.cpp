@@ -73,6 +73,15 @@ static Ztring MakeStatusFileName(size_t i)
 }
 
 //---------------------------------------------------------------------------
+static Ztring MakePositionFileName(size_t i)
+{
+    Ztring Result(SIM_PREFIX __T("pos."));
+    Result += Ztring::ToZtring(i);
+    Result += __T(".txt");
+    return Result;
+}
+
+//---------------------------------------------------------------------------
 struct status_info
 {
     playback_mode               Mode = Playback_Mode_NotPlaying;
@@ -94,6 +103,24 @@ static bool MakeStatusInfo(status_info& StatusInfo, size_t i)
     }
     return false;
 }
+
+//---------------------------------------------------------------------------
+static bool MakePosInfo(int64u& Pos, size_t i)
+{
+    auto Name = MakePositionFileName(i);
+    File List_F;
+    if (List_F.Open(Name, File::Access_Read))
+    {
+        char* s = (char*)&Pos;
+        if (!List_F.Read((int8u*)s, 8))
+            return false;
+        List_F.Close();
+        File::Delete(Name);
+        return true;
+    }
+    return false;
+}
+
 //---------------------------------------------------------------------------
 static ZtringListList ReadFileNames()
 {
@@ -130,6 +157,15 @@ SimulatorWrapper::SimulatorWrapper(std::size_t DeviceIndex)
         if (!File::Exists(FileNameExt))
             break;
         P->F.push_back(new File(FileNameExt));
+    }
+
+    if (!P->F.empty())
+    {
+        int64u Pos = 0;
+        if (MakePosInfo(Pos, 0))
+        {
+            P->F[0]->GoTo(Pos);
+        }
     }
 
     Ctl = P;
@@ -274,9 +310,8 @@ void SimulatorWrapper::WaitForSessionEnd()
             if (Position < 120000 * 2)
             {
                 F->GoTo(0, File::FromBegin);
-                P->Mode = Playback_Mode_NotPlaying;
-                P->Speed = 0;
                 P->Mutex.unlock();
+                SetPlaybackMode(Playback_Mode_NotPlaying, 0);
                 break;
                 //continue;
             }
@@ -342,5 +377,19 @@ void SimulatorWrapper::SetPlaybackMode(playback_mode Mode, float Speed)
 SimulatorWrapper::~SimulatorWrapper()
 {
     auto P = (ctl*)Ctl;
+
+    // I/O
+    if (P->Io_Pos != (size_t)-1)
+    {
+        auto& F = P->F[P->F_Pos];
+        int64u Pos = F->Position_Get();
+        File List_F;
+        if (List_F.Open(MakePositionFileName(P->Io_Pos), File::Access_Write))
+        {
+            List_F.Truncate();
+            List_F.Write((int8u*)&Pos, 8);
+        }
+    }
+
     delete P;
 }
