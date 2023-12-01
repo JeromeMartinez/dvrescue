@@ -289,34 +289,24 @@ void matroska_writer::write_header()
 
 void matroska_writer::write_frame(const char* video_buffer, int video_size, const char* audio_buffer, int audio_size, timecode_struct timecode)
 {
-    // Cues
     double timecode_ms = (double)frame_number * 1000 * framerate_den / framerate_num + 0.5;
     auto timecode_s = timecode_ms / 1000;
     if (timecode_s >= cues.size())
         cues.push_back({ (unsigned long long)timecode_ms, output_size });
-    
-    // Buffer
-    int total_size = 6 + 4 + 1 + 1 + (1 + 4 + 1 + 2 + 1) * 2 + video_size + audio_size;
+    int total_size = 4 + 1 + 1 + (1 + 4 + 1 + 2 + 1) * 2 + video_size + audio_size;
     if (timecode.is_valid())
         total_size += 1 + 4 + 18 + (1 + 4 + 1 + 2 + 1) * 1 + 11;
-    auto total_size_with_header = 8 + total_size;
-    if (buffer_size < total_size_with_header)
-    {
-        buffer_size = total_size_with_header;
-        delete[] buffer;
-        buffer = new char[buffer_size];
-    }
-    auto cur = buffer;
-
-    // Header
-    store_b4(cur, 0x1F43B675); // Cluster
-    store_e4(cur, total_size);
-    cur += 6; // CRC-32
-    store_b1(cur, 0xE7); // TimeStamp
-    store_b1(cur, 0x84);
-    store_b4(cur, (int)(timecode_ms+0.5));
+    char buffer[0x20];
+    char* cur;
+    size_t size;
 
     // Video
+    cur = buffer;
+    store_b4(cur, 0x1F43B675); // Cluster
+    store_e4(cur, total_size);
+    store_b1(cur, 0xE7); // TimeStamp
+    store_b1(cur, 0x84);
+    store_b4(cur, timecode_ms);
     if (timecode.is_valid())
     {
         store_b1(cur, 0xA0); // BlockGroup
@@ -329,9 +319,13 @@ void matroska_writer::write_frame(const char* video_buffer, int video_size, cons
     }
     store_e4(cur, 1 + 2 + 1 + video_size);
     store_b4(cur, 0x81000080); // TrackNumber + relative TimeStamp + Flags
-    memcpy(cur, video_buffer, video_size);
-    cur += video_size;
+    size = cur - buffer;
+    output->write(buffer, size);
+    output_size += size;
+    output->write(video_buffer, video_size);
+    output_size += video_size;
 
+    cur = buffer;
     if (timecode.is_valid())
     {
         unsigned long long timecode_value = ((unsigned long long)(((timecode.hours   / 10) & 3)) << 56)
@@ -347,13 +341,14 @@ void matroska_writer::write_frame(const char* video_buffer, int video_size, cons
         store_b8(cur, 0x8FA68DEE8179A588LL); // BlockMore size + BlockAddID + BlockAdditional
         store_b8(cur, timecode_value);
     }
-    
-    // Audio
     store_b1(cur, 0xA3); // SimpleBlock
     store_e4(cur, 1 + 2 + 1 + audio_size);
     store_b4(cur, 0x82000080); // TrackNumber + relative TimeStamp + Flags
-    memcpy(cur, audio_buffer, audio_size);
-    cur += audio_size;
+    size = cur - buffer;
+    output->write(buffer, size);
+    output_size += size;
+    output->write(audio_buffer, audio_size);
+    output_size += audio_size;
 
     if (timecode.is_valid())
     {
@@ -369,15 +364,17 @@ void matroska_writer::write_frame(const char* video_buffer, int video_size, cons
         text_buffer[ 9] += (timecode.frames  / 10) & 3;
         text_buffer[10] +=  timecode.frames  % 10;
 
+        cur = buffer;
         store_b1(cur, 0xA3); // SimpleBlock
         store_e4(cur, 1 + 2 + 1 + 11);
         store_b4(cur, 0x83000000); // TrackNumber + relative TimeStamp + Flags
+        size = cur - buffer;
+        output->write(buffer, size);
+        output_size += size;
+        output->write(text_buffer, 11);
+        output_size += 11;
     }
 
-    auto size = cur - buffer;
-    matroska_crc32_store(buffer + 8, total_size);
-    output->write(buffer, size);
-    output_size += size;
     frame_number++;
 
     cerr << "\33[2K\rCapture frame " << frame_number << ", press " << (InControl ? "q" : "ctrl+c") << " to stop.";
