@@ -59,7 +59,7 @@ struct ctl
     uint64_t                    Get_EB();
     bool                        UnknownSize(uint64_t Name, uint64_t Size);
     void                        ParseBuffer_Init(File& F);
-    void                        ParseBuffer(File& F);
+    bool                        ParseBuffer(File& F);
 
     typedef void (ctl::*call)();
     typedef call(ctl::*name)(uint64_t);
@@ -215,7 +215,7 @@ void ctl::ParseBuffer_Init(File& F)
 }
 
 //---------------------------------------------------------------------------
-void ctl::ParseBuffer(File& F)
+bool ctl::ParseBuffer(File& F)
 {
     while (Buffer_Offset < Levels[0].Offset_End)
     {
@@ -254,9 +254,11 @@ void ctl::ParseBuffer(File& F)
                 Buffer_Offset = 0;
             }
 
-            return; // New cluster
+            return false; // New cluster
         }
     }
+
+    return true;
 }
 
 //---------------------------------------------------------------------------
@@ -688,7 +690,11 @@ bool SimulatorWrapper::WaitForSessionEnd(uint64_t Timeout)
         P->Mutex.lock();
         if (P->NextClusterPos)
         {
-            P->ParseBuffer(*P->F[0]);
+            if (P->ParseBuffer(*P->F[0]))
+            {
+                P->Mutex.unlock();
+                break;
+            }
             P->Wrapper->Parse_Buffer((uint8_t*)&P->Decklink_Sim, sizeof(P->Decklink_Sim));
         }
         else
