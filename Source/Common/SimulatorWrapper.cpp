@@ -48,7 +48,7 @@ struct ctl
     uint8_t*                    Buffer;
     size_t                      Buffer_Size;
     size_t                      Buffer_Offset;
-    size_t                      CurrentClusterPos;
+    size_t                      CurrentClusterPos = (size_t)-1;
     size_t                      NextClusterPos;
 
     // MKV info
