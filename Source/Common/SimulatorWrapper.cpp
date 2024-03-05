@@ -248,6 +248,8 @@ bool ctl::ParseBuffer(File& F)
             {
                 for (size_t i = 0; i < Level; i++)
                     Levels[i].Offset_End -= Buffer_Offset;
+                NextClusterPos -= Buffer_Offset;
+                CurrentClusterPos = NextClusterPos;
                 memmove(Buffer, Buffer + Buffer_Offset, Buffer_Size - Buffer_Offset);
                 auto ToRead = Buffer_Offset < Levels[0].Offset_End ? Buffer_Offset : Levels[0].Offset_End;
                 F.Read(Buffer + Buffer_Size - Buffer_Offset, ToRead);
